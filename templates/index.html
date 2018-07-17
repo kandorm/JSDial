@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block head %}
+    {{ super() }}
+    <style>
+        .dialogue-area {
+            height: 400px;
+            overflow: auto;
+            background: #f5f5f5;
+        }
+        .utterance {
+            padding: 1% 1%;
+            margin: 1% 1%;
+            background: #fff;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1), 0 3px 5px 0 rgba(0, 0, 0, 0.1);
+        }
+        td {
+            text-align: left;
+        }
+    </style>
+{% endblock %}
+
+
+{% block page_content %}
+    <div class="row">
+        <div class="col-md-8">
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <h4 class="text-center">Dialogue system</h4>
+                </div>
+                <div class="dialogue-area" id="dialogue-area"></div>
+                    <textarea class="form-control" rows="3" id="user-utterance"></textarea>
+                <div style="float: right">
+                    <a class="btn btn-default" id="interact">Send</a>
+                </div>
+                <div style="float: right">
+                    <a class="btn btn-default" id="reset">Reset</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <table class="table">
+                <tbody>
+                    <tr>
+                        <td>food:</td>
+                        <td><a id="food"></a></td>
+                    </tr>
+                    <tr>
+                        <td>price range:</td>
+                        <td><a id="pricerange"></a></td>
+                    </tr>
+                    <tr>
+                        <td>area:</td>
+                        <td><a id="area"></a></td>
+                    </tr>
+                    <tr>
+                        <td>request:</td>
+                        <td>[ <a id="request"></a> ]</td>
+                    </tr>
+                    <tr>
+                        <td>user intent:</td>
+                        <td>[ <a id="user_intent"></a> ]</td>
+                    </tr>
+                    <tr>
+                        <td>db:</td>
+                        <td><a id="entity"></a></td>
+                    </tr>
+                    <tr>
+                        <td>sys_act:</td>
+                        <td><a id="last_sys_act"></a></td>
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script>
+        $(function () {
+            var server = "http://localhost:8000";
+            var reg_bye = /(\b|^|\ )(bye|goodbye|that'?s?\ (is\ )*all)(\s|$|\ |\.)/;
+            var b_s = {};
+            var lst_sys_act = "";
+            function update(utt, role) {
+                var div = document.getElementById('dialogue-area');
+                switch(role) {
+                    case 'user':
+                        div.innerHTML += '<div class="row">'
+                            + '<div class="col-md-1"><span class="glyphicon glyphicon-user" style="font-size:125%"></span></div>'
+                            + '<div class="col-md-11"><div class="utterance"><h4>' + utt +'</h4></div></div>'
+                            + '</div>';
+                        break;
+                    case 'server':
+                        div.innerHTML += '<div class="row">'
+                            + '<div class="col-md-1"><span class="glyphicon glyphicon-modal-window" style="font-size:125%"></span></div>'
+                            + '<div class="col-md-11"><div class="utterance"><h4>' + utt +'</h4></div></div>'
+                            + '</div>';
+                        break;
+                    default:
+                        break;
+                }
+                div.scrollTop = div.scrollHeight;
+            }
+            function bs_all(bs, name) {
+                var c_bs = bs[name];
+                x = document.getElementById(name)
+                x.innerHTML=c_bs;
+            }
+            function bs_cond(bs, name) {
+                var insert_vaue = "";
+                var num = 0;
+                var c_bs = bs[name];
+                for(var k in c_bs) {
+                    if(c_bs[k] > 0.5) {
+                        if(num == 0) {
+                            insert_vaue += k
+                            num += 1
+                        } else {
+                            insert_vaue += ", " + k
+                        }
+                    }
+                }
+                x = document.getElementById(name)
+                x.innerHTML=insert_vaue;
+            }
+            function bs_topone(bs, name) {
+                var c_bs = bs[name]
+                var s_bs = Object.keys(c_bs).sort(function(a, b) {return c_bs[b] - c_bs[a]})
+                x = document.getElementById(name)
+                x.innerHTML=s_bs[0] + " " + parseFloat(c_bs[s_bs[0]]).toFixed(2);
+            }
+            $('#user-utterance').keydown(function (e) {
+                var curkey = e.which;
+                if(curkey == 13) {
+                    $('#interact').click();
+                    return false;
+                }
+            });
+            $('#reset').click(function () {
+                b_s = {};
+                lst_sys_act = "";
+                var n_list = ['food', 'pricerange', 'area', 'request', 'user_intent', 'entity', 'last_sys_act', 'dialogue-area']
+                for(var i in n_list) {
+                    var div = document.getElementById(n_list[i]);
+                    div.innerHTML = ""
+                }
+            })
+            $('#interact').click(function () {
+                var user_input = $('#user-utterance').val();
+                if(user_input == "")
+                    return;
+                update(user_input, 'user');
+                $('#user-utterance').val("").focus();
+                if(reg_bye.test(user_input)) {
+                    update('bye', 'server');
+                } else {
+                    $.ajax({
+                        type: "POST",
+                        url: server,
+                        contentType: "application/json;charset=utf-8",
+                        dataType:"json",
+                        data: JSON.stringify({
+                            user_utt: user_input,
+                            last_sys_act: lst_sys_act,
+                            belief_state: b_s
+                        }), 
+                        success: function (data) {
+                            b_s = data["belief_state"];
+                            lst_sys_act = data["last_sys_act"];
+                            bs_topone(b_s, "food")
+                            bs_topone(b_s, "pricerange")
+                            bs_topone(b_s, "area")
+                            bs_cond(b_s, "request")
+                            bs_cond(b_s, "user_intent")
+                            bs_all(b_s, "entity")
+                            bs_all(data, "last_sys_act")
+                            update(data["generated"], 'server');
+                        }
+                    })
+                }
+            });
+        });
+    </script>
+{% endblock %}
